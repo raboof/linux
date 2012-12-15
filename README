@@ -1,3 +1,7 @@
+Took v3.6.10 and applied the -rt22 patchset with:
+
+  for patch in `cat ../patches/series | grep -ve "^#" | grep patch` ; do patch -p1 < ../patches/$patch ; git add -A ; git commit -m "Apply $patch from patches-3.6.10-rt22" ; done
+
         Linux kernel release 3.x <http://kernel.org/>
 
 These are the release notes for Linux version 3.  Read them carefully,
