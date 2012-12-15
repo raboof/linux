@@ -1,3 +1,13 @@
+v3.7-rt22 branch
+
+This is a branch based off v3.7 of the kernel, where I applied the 
+patch-3.6.10-rt22.patch and am trying to port it to this new version.
+
+It now compiles, but gets stuck in an error loop on startup. The most relevant
+error message appears to be:
+
+  Scheduling while atomic: ksoftirqd/0/3/0x00000002
+
         Linux kernel release 3.x <http://kernel.org/>
 
 These are the release notes for Linux version 3.  Read them carefully,
