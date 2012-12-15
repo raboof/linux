@@ -1,0 +1,15 @@
+--- kernel/timer.c
++++ kernel/timer.c
+@@ -1245,10 +1296,11 @@
+ 
+ 			spin_unlock_irq(&base->lock);
+ 			call_timer_fn(timer, fn, data);
++			base->running_timer = NULL;
+ 			spin_lock_irq(&base->lock);
+ 		}
+ 	}
+-	base->running_timer = NULL;
++	wake_up(&base->wait_for_running_timer);
+ 	spin_unlock_irq(&base->lock);
+ }
+ 

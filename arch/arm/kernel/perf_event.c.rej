@@ -1,0 +1,11 @@
+--- arch/arm/kernel/perf_event.c
++++ arch/arm/kernel/perf_event.c
+@@ -430,7 +430,7 @@
+ 		}
+ 
+ 		err = request_irq(irq, handle_irq,
+-				  IRQF_DISABLED | IRQF_NOBALANCING,
++				  IRQF_NOBALANCING | IRQF_NO_THREAD,
+ 				  "arm-pmu", armpmu);
+ 		if (err) {
+ 			pr_err("unable to request IRQ%d for ARM PMU counters\n",

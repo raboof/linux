@@ -60,10 +60,11 @@ config LOCKDEP_SUPPORT
 
 config RWSEM_GENERIC_SPINLOCK
 	bool
+	default y if PREEMPT_RT_FULL
 
 config RWSEM_XCHGADD_ALGORITHM
 	bool
-	default y
+	default y if !PREEMPT_RT_FULL
 
 config GENERIC_LOCKBREAK
 	bool
@@ -286,7 +287,7 @@ menu "Kernel options"
 
 config HIGHMEM
 	bool "High memory support"
-	depends on PPC32
+	depends on PPC32 && !PREEMPT_RT_FULL
 
 source kernel/Kconfig.hz
 source kernel/Kconfig.preempt

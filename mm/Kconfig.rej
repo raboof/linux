@@ -1,0 +1,11 @@
+--- mm/Kconfig
++++ mm/Kconfig
+@@ -318,7 +318,7 @@
+ 
+ config TRANSPARENT_HUGEPAGE
+ 	bool "Transparent Hugepage Support"
+-	depends on X86 && MMU
++	depends on X86 && MMU && !PREEMPT_RT_FULL
+ 	select COMPACTION
+ 	help
+ 	  Transparent Hugepages allows the kernel to use huge pages and

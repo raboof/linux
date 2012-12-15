@@ -1,0 +1,11 @@
+--- lib/scatterlist.c
++++ lib/scatterlist.c
+@@ -479,7 +479,7 @@
+ 			flush_kernel_dcache_page(miter->page);
+ 
+ 		if (miter->__flags & SG_MITER_ATOMIC) {
+-			WARN_ON(!irqs_disabled());
++			WARN_ON_NONRT(!irqs_disabled());
+ 			kunmap_atomic(miter->addr);
+ 		} else
+ 			kunmap(miter->page);

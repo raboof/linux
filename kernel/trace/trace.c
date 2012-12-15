@@ -402,11 +402,13 @@ EXPORT_SYMBOL_GPL(tracing_is_on);
  */
 void trace_wake_up(void)
 {
+#ifndef CONFIG_PREEMPT_RT_FULL
 	const unsigned long delay = msecs_to_jiffies(2);
 
 	if (trace_flags & TRACE_ITER_BLOCK)
 		return;
 	schedule_delayed_work(&wakeup_work, delay);
+#endif
 }
 
 static int __init set_buf_size(char *str)
@@ -756,6 +758,12 @@ update_max_tr_single(struct trace_array *tr, struct task_struct *tsk, int cpu)
 	arch_spin_unlock(&ftrace_max_lock);
 }
 #endif /* CONFIG_TRACER_MAX_TRACE */
+
+#ifndef CONFIG_PREEMPT_RT_FULL
+static void default_wait_pipe(struct trace_iterator *iter);
+#else
+#define default_wait_pipe	poll_wait_pipe
+#endif
 
 /**
  * register_tracer - register a tracer with the ftrace system.
@@ -1145,6 +1153,7 @@ tracing_generic_entry_update(struct trace_entry *entry, unsigned long flags,
 	struct task_struct *tsk = current;
 
 	entry->preempt_count		= pc & 0xff;
+	entry->preempt_lazy_count	= preempt_lazy_count();
 	entry->pid			= (tsk) ? tsk->pid : 0;
 	entry->padding			= 0;
 	entry->flags =
@@ -1155,7 +1164,10 @@ tracing_generic_entry_update(struct trace_entry *entry, unsigned long flags,
 #endif
 		((pc & HARDIRQ_MASK) ? TRACE_FLAG_HARDIRQ : 0) |
 		((pc & SOFTIRQ_MASK) ? TRACE_FLAG_SOFTIRQ : 0) |
-		(need_resched() ? TRACE_FLAG_NEED_RESCHED : 0);
+		(need_resched_now() ? TRACE_FLAG_NEED_RESCHED : 0) |
+		(need_resched_lazy() ? TRACE_FLAG_NEED_RESCHED_LAZY : 0);
+
+	entry->migrate_disable	= (tsk) ? __migrate_disabled(tsk) & 0xFF : 0;
 }
 EXPORT_SYMBOL_GPL(tracing_generic_entry_update);
 
@@ -1976,14 +1988,17 @@ get_total_entries(struct trace_array *tr, unsigned long *total, unsigned long *e
 
 static void print_lat_help_header(struct seq_file *m)
 {
-	seq_puts(m, "#                  _------=> CPU#            \n");
-	seq_puts(m, "#                 / _-----=> irqs-off        \n");
-	seq_puts(m, "#                | / _----=> need-resched    \n");
-	seq_puts(m, "#                || / _---=> hardirq/softirq \n");
-	seq_puts(m, "#                ||| / _--=> preempt-depth   \n");
-	seq_puts(m, "#                |||| /     delay             \n");
-	seq_puts(m, "#  cmd     pid   ||||| time  |   caller      \n");
-	seq_puts(m, "#     \\   /      |||||  \\    |   /           \n");
+	seq_puts(m, "#                   _--------=> CPU#              \n");
+	seq_puts(m, "#                  / _-------=> irqs-off          \n");
+	seq_puts(m, "#                 | / _------=> need-resched      \n");
+	seq_puts(m, "#                 || / _-----=> need-resched_lazy \n");
+	seq_puts(m, "#                 ||| / _----=> hardirq/softirq   \n");
+	seq_puts(m, "#                 |||| / _---=> preempt-depth     \n");
+	seq_puts(m, "#                 ||||| / _--=> preempt-lazy-depth\n");
+	seq_puts(m, "#                 |||||| / _-=> migrate-disable   \n");
+	seq_puts(m, "#                 ||||||| /     delay             \n");
+	seq_puts(m, "#  cmd     pid    |||||||| time  |   caller       \n");
+	seq_puts(m, "#     \\   /      ||||||||  \\   |   /            \n");
 }
 
 static void print_event_info(struct trace_array *tr, struct seq_file *m)
@@ -2007,13 +2022,16 @@ static void print_func_help_header(struct trace_array *tr, struct seq_file *m)
 static void print_func_help_header_irq(struct trace_array *tr, struct seq_file *m)
 {
 	print_event_info(tr, m);
-	seq_puts(m, "#                              _-----=> irqs-off\n");
-	seq_puts(m, "#                             / _----=> need-resched\n");
-	seq_puts(m, "#                            | / _---=> hardirq/softirq\n");
-	seq_puts(m, "#                            || / _--=> preempt-depth\n");
-	seq_puts(m, "#                            ||| /     delay\n");
-	seq_puts(m, "#           TASK-PID   CPU#  ||||    TIMESTAMP  FUNCTION\n");
-	seq_puts(m, "#              | |       |   ||||       |         |\n");
+	seq_puts(m, "#                              _-------=> irqs-off          \n");
+	seq_puts(m, "#                            /  _------=> need-resched      \n");
+	seq_puts(m, "#                            |/  _-----=> need-resched_lazy \n");
+	seq_puts(m, "#                            ||/  _----=> hardirq/softirq   \n");
+	seq_puts(m, "#                            |||/  _---=> preempt-depth     \n");
+	seq_puts(m, "#                            ||||/  _--=> preempt-lazy-depth\n");
+	seq_puts(m, "#                            ||||| / _-=> migrate-disable   \n");
+	seq_puts(m, "#                            |||||| /     delay\n");
+	seq_puts(m, "#           TASK-PID   CPU#  |||||||    TIMESTAMP  FUNCTION\n");
+	seq_puts(m, "#              | |       |   |||||||       |         |\n");
 }
 
 void
@@ -3364,6 +3382,7 @@ static int tracing_release_pipe(struct inode *inode, struct file *file)
 	return 0;
 }
 
+#ifndef CONFIG_PREEMPT_RT_FULL
 static unsigned int
 tracing_poll_pipe(struct file *filp, poll_table *poll_table)
 {
@@ -3385,8 +3404,7 @@ tracing_poll_pipe(struct file *filp, poll_table *poll_table)
 	}
 }
 
-
-void default_wait_pipe(struct trace_iterator *iter)
+static void default_wait_pipe(struct trace_iterator *iter)
 {
 	DEFINE_WAIT(wait);
 
@@ -3397,6 +3415,20 @@ void default_wait_pipe(struct trace_iterator *iter)
 
 	finish_wait(&trace_wait, &wait);
 }
+#else
+static unsigned int
+tracing_poll_pipe(struct file *filp, poll_table *poll_table)
+{
+	struct trace_iterator *iter = filp->private_data;
+
+	if ((trace_flags & TRACE_ITER_BLOCK) || !trace_empty(iter))
+		return POLLIN | POLLRDNORM;
+	poll_wait_pipe(iter);
+	if (!trace_empty(iter))
+		return POLLIN | POLLRDNORM;
+	return 0;
+}
+#endif
 
 /*
  * This is a make-shift waitqueue.

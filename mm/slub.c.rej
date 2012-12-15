@@ -1,0 +1,34 @@
+--- mm/slub.c
++++ mm/slub.c
+@@ -1969,7 +1999,7 @@
+  * If we did not find a slot then simply move all the partials to the
+  * per node partial list.
+  */
+-int put_cpu_partial(struct kmem_cache *s, struct page *page, int drain)
++static int put_cpu_partial(struct kmem_cache *s, struct page *page, int drain)
+ {
+ 	struct page *oldpage;
+ 	int pages;
+@@ -1984,14 +2014,21 @@
+ 			pobjects = oldpage->pobjects;
+ 			pages = oldpage->pages;
+ 			if (drain && pobjects > s->cpu_partial) {
++				struct slub_free_list *f;
+ 				unsigned long flags;
++				LIST_HEAD(tofree);
+ 				/*
+ 				 * partial array is full. Move the existing
+ 				 * set to the per node partial list.
+ 				 */
+ 				local_irq_save(flags);
+-				unfreeze_partials(s);
++				unfreeze_partials(s, this_cpu_ptr(s->cpu_slab));
++				f = &__get_cpu_var(slub_free_list);
++				raw_spin_lock(&f->lock);
++				list_splice_init(&f->list, &tofree);
++				raw_spin_unlock(&f->lock);
+ 				local_irq_restore(flags);
++				free_delayed(s, &tofree);
+ 				pobjects = 0;
+ 				pages = 0;
+ 				stat(s, CPU_PARTIAL_DRAIN);

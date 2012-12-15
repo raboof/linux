@@ -1,0 +1,12 @@
+--- kernel/time/timekeeping.c
++++ kernel/time/timekeeping.c
+@@ -74,7 +74,8 @@
+ 	/* The raw monotonic time for the CLOCK_MONOTONIC_RAW posix clock. */
+ 	struct timespec		raw_time;
+ 	/* Seqlock for all timekeeper values */
+-	seqlock_t		lock;
++	seqcount_t		seq;
++	raw_spinlock_t		lock;
+ };
+ 
+ static struct timekeeper timekeeper;

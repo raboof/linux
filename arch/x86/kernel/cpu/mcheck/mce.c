@@ -41,6 +41,7 @@
 #include <linux/debugfs.h>
 #include <linux/irq_work.h>
 #include <linux/export.h>
+#include <linux/jiffies.h>
 
 #include <asm/processor.h>
 #include <asm/mce.h>
@@ -2302,6 +2303,8 @@ static void __cpuinit mce_disable_cpu(void *h)
 	if (!mce_available(__this_cpu_ptr(&cpu_info)))
 		return;
 
+	hrtimer_cancel(&__get_cpu_var(mce_timer));
+
 	if (!(action & CPU_TASKS_FROZEN))
 		cmci_clear();
 	for (i = 0; i < banks; i++) {
@@ -2328,6 +2331,7 @@ static void __cpuinit mce_reenable_cpu(void *h)
 		if (b->init)
 			wrmsrl(MSR_IA32_MCx_CTL(i), b->ctl);
 	}
+	__mcheck_cpu_init_timer();
 }
 
 /* Get notified when a cpu comes on/off. Be hotplug friendly. */
@@ -2335,7 +2339,6 @@ static int __cpuinit
 mce_cpu_callback(struct notifier_block *nfb, unsigned long action, void *hcpu)
 {
 	unsigned int cpu = (unsigned long)hcpu;
-	struct timer_list *t = &per_cpu(mce_timer, cpu);
 
 	switch (action & ~CPU_TASKS_FROZEN) {
 	case CPU_ONLINE:

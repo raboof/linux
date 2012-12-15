@@ -1,0 +1,14 @@
+--- arch/x86/kernel/traps.c
++++ arch/x86/kernel/traps.c
+@@ -239,9 +253,9 @@
+ 	if (notify_die(DIE_TRAP, "stack segment", regs, error_code,
+ 			X86_TRAP_SS, SIGBUS) == NOTIFY_STOP)
+ 		return;
+-	preempt_conditional_sti(regs);
++	conditional_sti_ist(regs);
+ 	do_trap(X86_TRAP_SS, SIGBUS, "stack segment", regs, error_code, NULL);
+-	preempt_conditional_cli(regs);
++	conditional_cli_ist(regs);
+ }
+ 
+ dotraplinkage void do_double_fault(struct pt_regs *regs, long error_code)
