@@ -69,6 +69,7 @@
 #include <linux/slab.h>
 #include <linux/perf_event.h>
 #include <linux/file.h>
+#include <linux/posix-timers.h>
 #include <linux/ptrace.h>
 
 #include <asm/io.h>

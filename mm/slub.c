@@ -1987,14 +1987,21 @@ static int put_cpu_partial(struct kmem_cache *s, struct page *page, int drain)
 			pobjects = oldpage->pobjects;
 			pages = oldpage->pages;
 			if (drain && pobjects > s->cpu_partial) {
+				struct slub_free_list *f;
 				unsigned long flags;
+				LIST_HEAD(tofree);
 				/*
 				 * partial array is full. Move the existing
 				 * set to the per node partial list.
 				 */
 				local_irq_save(flags);
-				unfreeze_partials(s);
-				local_irq_restore(flags);
+				unfreeze_partials(s, this_cpu_ptr(s->cpu_slab));
+				f = &__get_cpu_var(slub_free_list);
+				raw_spin_lock(&f->lock);
+				list_splice_init(&f->list, &tofree);
+				raw_spin_unlock(&f->lock);
+ 				local_irq_restore(flags);
+				free_delayed(s, &tofree);
 				oldpage = NULL;
 				pobjects = 0;
 				pages = 0;

@@ -461,13 +461,13 @@ EXPORT_SYMBOL(mark_page_accessed);
  */
 void __lru_cache_add(struct page *page, enum lru_list lru)
 {
-	struct pagevec *pvec = &get_cpu_var(lru_add_pvecs)[lru];
+	struct pagevec *pvec = &get_locked_var(swap_lock, lru_add_pvecs)[lru];
 
 	page_cache_get(page);
 	if (!pagevec_space(pvec))
 		__pagevec_lru_add(pvec, lru);
 	pagevec_add(pvec, page);
-	put_cpu_var(lru_add_pvecs);
+	put_locked_var(swap_lock, lru_add_pvecs);
 }
 EXPORT_SYMBOL(__lru_cache_add);
 

@@ -246,9 +246,9 @@ dotraplinkage void do_stack_segment(struct pt_regs *regs, long error_code)
 	exception_enter(regs);
 	if (notify_die(DIE_TRAP, "stack segment", regs, error_code,
 		       X86_TRAP_SS, SIGBUS) != NOTIFY_STOP) {
-		preempt_conditional_sti(regs);
+		conditional_sti_ist(regs);
 		do_trap(X86_TRAP_SS, SIGBUS, "stack segment", regs, error_code, NULL);
-		preempt_conditional_cli(regs);
+		conditional_cli_ist(regs);
 	}
 	exception_exit(regs);
 }

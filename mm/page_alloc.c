@@ -697,34 +697,26 @@ static void isolate_pcp_pages(int to_free, struct per_cpu_pages *src,
 			batch_free = to_free;
 
 		do {
-			int mt;	/* migratetype of the to-be-freed page */
-
-			page = list_entry(list->prev, struct page, lru);
-			/* must delete as __free_one_page list manipulates */
+			page = list_last_entry(list, struct page, lru);
 			list_del(&page->lru);
-			mt = get_freepage_migratetype(page);
-			/* MIGRATE_MOVABLE list may include MIGRATE_RESERVEs */
-			__free_one_page(page, zone, 0, mt);
-			trace_mm_page_pcpu_drain(page, 0, mt);
-			if (is_migrate_cma(mt))
-				__mod_zone_page_state(zone, NR_FREE_CMA_PAGES, 1);
+			list_add(&page->lru, dst);
 		} while (--to_free && --batch_free && !list_empty(list));
 	}
-	__mod_zone_page_state(zone, NR_FREE_PAGES, count);
-	spin_unlock(&zone->lock);
 }
 
 static void free_one_page(struct zone *zone, struct page *page, int order,
 				int migratetype)
 {
-	spin_lock(&zone->lock);
+	unsigned long flags;
+
+	spin_lock_irqsave(&zone->lock, flags);
 	zone->all_unreclaimable = 0;
 	zone->pages_scanned = 0;
 
 	__free_one_page(page, zone, order, migratetype);
 	if (unlikely(migratetype != MIGRATE_ISOLATE))
 		__mod_zone_freepage_state(zone, 1 << order, migratetype);
-	spin_unlock(&zone->lock);
+	spin_unlock_irqrestore(&zone->lock, flags);
 }
 
 static bool free_pages_prepare(struct page *page, unsigned int order)
@@ -761,12 +753,12 @@ static void __free_pages_ok(struct page *page, unsigned int order)
 	if (!free_pages_prepare(page, order))
 		return;
 
-	local_irq_save(flags);
+	local_lock_irqsave(pa_lock, flags);
 	__count_vm_events(PGFREE, 1 << order);
 	migratetype = get_pageblock_migratetype(page);
 	set_freepage_migratetype(page, migratetype);
 	free_one_page(page_zone(page), page, order, migratetype);
-	local_irq_restore(flags);
+	local_unlock_irqrestore(pa_lock, flags);
 }
 
 void __meminit __free_pages_bootmem(struct page *page, unsigned int order)
@@ -1353,7 +1345,7 @@ void free_hot_cold_page(struct page *page, int cold)
 
 	migratetype = get_pageblock_migratetype(page);
 	set_freepage_migratetype(page, migratetype);
-	local_irq_save(flags);
+	local_lock_irqsave(pa_lock, flags);
 	__count_vm_event(PGFREE);
 
 	/*
@@ -1562,18 +1554,20 @@ again:
 			 */
 			WARN_ON_ONCE(order > 1);
 		}
-		spin_lock_irqsave(&zone->lock, flags);
+		local_spin_lock_irqsave(pa_lock, &zone->lock, flags);
 		page = __rmqueue(zone, order, migratetype);
-		spin_unlock(&zone->lock);
-		if (!page)
+		if (!page) {
+			spin_unlock(&zone->lock);
 			goto failed;
+		}
 		__mod_zone_freepage_state(zone, -(1 << order),
 					  get_pageblock_migratetype(page));
+		spin_unlock(&zone->lock);
 	}
 
 	__count_zone_vm_events(PGALLOC, zone, 1 << order);
 	zone_statistics(preferred_zone, zone, gfp_flags);
-	local_irq_restore(flags);
+	local_unlock_irqrestore(pa_lock, flags);
 
 	VM_BUG_ON(bad_range(zone, page));
 	if (prep_new_page(page, order, gfp_flags))
@@ -5971,17 +5965,20 @@ static int __meminit __zone_pcp_update(void *data)
 	for_each_possible_cpu(cpu) {
 		struct per_cpu_pageset *pset;
 		struct per_cpu_pages *pcp;
+		LIST_HEAD(dst);
 
 		pset = per_cpu_ptr(zone->pageset, cpu);
 		pcp = &pset->pcp;
 
-		local_irq_save(flags);
-		if (pcp->count > 0)
-			free_pcppages_bulk(zone, pcp->count, pcp);
-		drain_zonestat(zone, pset);
-		setup_pageset(pset, batch);
-		local_irq_restore(flags);
-	}
+		// ARN do we need this? 
+		// drain_zonestat(zone, pset);
+		cpu_lock_irqsave(cpu, flags);
+		if (pcp->count > 0) {
+			isolate_pcp_pages(pcp->count, pcp, &dst);
+			free_pcppages_bulk(zone, pcp->count, &dst);
+		}
+		cpu_unlock_irqrestore(cpu, flags);
+ }
 	return 0;
 }
 
@@ -5999,7 +5996,7 @@ void zone_pcp_reset(struct zone *zone)
 	struct per_cpu_pageset *pset;
 
 	/* avoid races with drain_pages()  */
-	local_irq_save(flags);
+	local_lock_irqsave(pa_lock, flags);
 	if (zone->pageset != &boot_pageset) {
 		for_each_online_cpu(cpu) {
 			pset = per_cpu_ptr(zone->pageset, cpu);
@@ -6008,7 +6005,7 @@ void zone_pcp_reset(struct zone *zone)
 		free_percpu(zone->pageset);
 		zone->pageset = &boot_pageset;
 	}
-	local_irq_restore(flags);
+	local_unlock_irqrestore(pa_lock, flags);
 }
 
 /*

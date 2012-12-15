@@ -21,10 +21,12 @@
 #include <linux/freezer.h>
 #include <linux/kthread.h>
 #include <linux/rcupdate.h>
+#include <linux/delay.h>
 #include <linux/ftrace.h>
 #include <linux/smp.h>
 #include <linux/smpboot.h>
 #include <linux/tick.h>
+#include <linux/locallock.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/irq.h>
@@ -478,7 +480,7 @@ static void do_single_softirq(int which, int need_rcu_bh_qs)
 	unsigned long old_flags = current->flags;
 
 	current->flags &= ~PF_MEMALLOC;
-	account_system_vtime(current);
+	vtime_account(current);
 	current->flags |= PF_IN_SOFTIRQ;
 	lockdep_softirq_enter();
 	local_irq_enable();
@@ -486,7 +488,7 @@ static void do_single_softirq(int which, int need_rcu_bh_qs)
 	local_irq_disable();
 	lockdep_softirq_exit();
 	current->flags &= ~PF_IN_SOFTIRQ;
-	account_system_vtime(current);
+	vtime_account(current);
 	tsk_restore_flags(current, old_flags, PF_MEMALLOC);
 }
 
@@ -1197,17 +1199,33 @@ static int ksoftirqd_should_run(unsigned int cpu)
 	return local_softirq_pending();
 }
 
+#if defined(CONFIG_SMP) || defined(CONFIG_PREEMPT_RT_FULL)
+void tasklet_unlock_wait(struct tasklet_struct *t)
+{
+	while (test_bit(TASKLET_STATE_RUN, &(t)->state)) {
+		/*
+		 * Hack for now to avoid this busy-loop:
+		 */
+#ifdef CONFIG_PREEMPT_RT_FULL
+		msleep(1);
+#else
+		barrier();
+#endif
+	}
+}
+EXPORT_SYMBOL(tasklet_unlock_wait);
+#endif
+ 
 static void run_ksoftirqd(unsigned int cpu)
 {
-	local_irq_disable();
-	if (local_softirq_pending()) {
-		__do_softirq();
+	ksoftirqd_set_sched_params();
+
+	if (ksoftirqd_softirq_pending()) {
+		ksoftirqd_do_softirq(cpu);
 		rcu_note_context_switch(cpu);
-		local_irq_enable();
 		cond_resched();
-		return;
 	}
-	local_irq_enable();
+	ksoftirqd_clr_sched_params();
 }
 
 #ifdef CONFIG_HOTPLUG_CPU
@@ -1273,10 +1291,9 @@ static int __cpuinit cpu_callback(struct notifier_block *nfb,
 				  unsigned long action,
 				  void *hcpu)
 {
-	switch (action) {
+	switch (action & ~CPU_TASKS_FROZEN) {
 #ifdef CONFIG_HOTPLUG_CPU
 	case CPU_DEAD:
-	case CPU_DEAD_FROZEN:
 		takeover_tasklets((unsigned long)hcpu);
 		break;
 #endif /* CONFIG_HOTPLUG_CPU */

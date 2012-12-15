@@ -1226,15 +1226,17 @@ static inline void __run_timers(struct tvec_base *base)
 			if (irqsafe) {
 				spin_unlock(&base->lock);
 				call_timer_fn(timer, fn, data);
+				base->running_timer = NULL;
 				spin_lock(&base->lock);
 			} else {
 				spin_unlock_irq(&base->lock);
 				call_timer_fn(timer, fn, data);
+				base->running_timer = NULL;
 				spin_lock_irq(&base->lock);
 			}
 		}
 	}
-	base->running_timer = NULL;
+	wake_up(&base->wait_for_running_timer);
 	spin_unlock_irq(&base->lock);
 }
 

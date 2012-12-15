@@ -42,18 +42,29 @@
 #endif
 
 struct lglock {
-	arch_spinlock_t __percpu *lock;
+#ifndef CONFIG_PREEMPT_RT_FULL
+ 	arch_spinlock_t __percpu *lock;
+#else
+	struct rt_mutex __percpu *lock;
+#endif
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
 	struct lock_class_key lock_key;
 	struct lockdep_map    lock_dep_map;
 #endif
 };
 
-#define DEFINE_LGLOCK(name)						\
+#ifndef CONFIG_PREEMPT_RT_FULL
+# define DEFINE_LGLOCK(name)						\
 	static DEFINE_PER_CPU(arch_spinlock_t, name ## _lock)		\
 	= __ARCH_SPIN_LOCK_UNLOCKED;					\
 	struct lglock name = { .lock = &name ## _lock }
-
+#else
+# define DEFINE_LGLOCK(name)						\
+	DEFINE_LGLOCK_LOCKDEP(name);					\
+	DEFINE_PER_CPU(struct rt_mutex, name ## _lock);			\
+	struct lglock name = { .lock = &name ## _lock }
+#endif
+ 
 #define DEFINE_STATIC_LGLOCK(name)					\
 	static DEFINE_PER_CPU(arch_spinlock_t, name ## _lock)		\
 	= __ARCH_SPIN_LOCK_UNLOCKED;					\

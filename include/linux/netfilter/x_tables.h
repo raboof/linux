@@ -3,6 +3,7 @@
 
 
 #include <linux/netdevice.h>
+#include <linux/locallock.h>
 #include <uapi/linux/netfilter/x_tables.h>
 
 /**

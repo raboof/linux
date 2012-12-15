@@ -1266,7 +1266,7 @@ void mce_log_therm_throt_event(__u64 status)
 static unsigned long check_interval = 5 * 60; /* 5 minutes */
 
 static DEFINE_PER_CPU(unsigned long, mce_next_interval); /* in jiffies */
-static DEFINE_PER_CPU(struct timer_list, mce_timer);
+static DEFINE_PER_CPU(struct hrtimer, mce_timer);
 
 static unsigned long mce_adjust_timer_default(unsigned long interval)
 {
@@ -1276,12 +1276,9 @@ static unsigned long mce_adjust_timer_default(unsigned long interval)
 static unsigned long (*mce_adjust_timer)(unsigned long interval) =
 	mce_adjust_timer_default;
 
-static void mce_timer_fn(unsigned long data)
+static enum hrtimer_restart mce_timer_fn(struct hrtimer *timer)
 {
-	struct timer_list *t = &__get_cpu_var(mce_timer);
 	unsigned long iv;
-
-	WARN_ON(smp_processor_id() != data);
 
 	if (mce_available(__this_cpu_ptr(&cpu_info))) {
 		machine_check_poll(MCP_TIMESTAMP,
@@ -1303,9 +1300,10 @@ static void mce_timer_fn(unsigned long data)
 	__this_cpu_write(mce_next_interval, iv);
 	/* Might have become 0 after CMCI storm subsided */
 	if (iv) {
-		t->expires = jiffies + iv;
-		add_timer_on(t, smp_processor_id());
+		hrtimer_forward(timer, timer->base->get_time(),
+				ns_to_ktime(jiffies_to_usecs(iv)));
 	}
+	return HRTIMER_RESTART;
 }
 
 /*
@@ -1313,16 +1311,18 @@ static void mce_timer_fn(unsigned long data)
  */
 void mce_timer_kick(unsigned long interval)
 {
-	struct timer_list *t = &__get_cpu_var(mce_timer);
-	unsigned long when = jiffies + interval;
+	struct hrtimer *t = &__get_cpu_var(mce_timer);
 	unsigned long iv = __this_cpu_read(mce_next_interval);
 
-	if (timer_pending(t)) {
-		if (time_before(when, t->expires))
-			mod_timer_pinned(t, when);
+	if (hrtimer_active(t)) {
+		if (ktime_to_us(hrtimer_get_remaining(t)) > jiffies_to_usecs(interval)) {
+			hrtimer_cancel(t);
+			hrtimer_start_range_ns(t, ns_to_ktime(jiffies_to_usecs(iv) * 1000),
+					       0, HRTIMER_MODE_REL_PINNED);
+		}
 	} else {
-		t->expires = round_jiffies(when);
-		add_timer_on(t, smp_processor_id());
+		hrtimer_start_range_ns(t, ns_to_ktime(jiffies_to_usecs(iv) * 1000),
+				       0, HRTIMER_MODE_REL_PINNED);
 	}
 	if (interval < iv)
 		__this_cpu_write(mce_next_interval, interval);
@@ -1334,7 +1334,7 @@ static void mce_timer_delete_all(void)
 	int cpu;
 
 	for_each_online_cpu(cpu)
-		del_timer_sync(&per_cpu(mce_timer, cpu));
+		hrtimer_cancel(&per_cpu(mce_timer, cpu));
 }
 
 static void mce_do_trigger(struct work_struct *work)
@@ -1645,11 +1645,10 @@ static void mce_start_timer(unsigned int cpu, struct timer_list *t)
 
 static void __mcheck_cpu_init_timer(void)
 {
-	struct timer_list *t = &__get_cpu_var(mce_timer);
-	unsigned int cpu = smp_processor_id();
+	struct hrtimer *t = &__get_cpu_var(mce_timer);
 
-	setup_timer(t, mce_timer_fn, cpu);
-	mce_start_timer(cpu, t);
+	hrtimer_init(t, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	t->function = mce_timer_fn;
 }
 
 /* Handle unconfigured int18 (should never happen) */
@@ -2354,11 +2353,9 @@ mce_cpu_callback(struct notifier_block *nfb, unsigned long action, void *hcpu)
 		break;
 	case CPU_DOWN_PREPARE:
 		smp_call_function_single(cpu, mce_disable_cpu, &action, 1);
-		del_timer_sync(t);
 		break;
 	case CPU_DOWN_FAILED:
 		smp_call_function_single(cpu, mce_reenable_cpu, &action, 1);
-		mce_start_timer(cpu, t);
 		break;
 	}
 
