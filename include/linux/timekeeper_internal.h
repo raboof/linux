@@ -62,8 +62,9 @@ struct timekeeper {
 	ktime_t			offs_boot;
 	/* The raw monotonic time for the CLOCK_MONOTONIC_RAW posix clock. */
 	struct timespec		raw_time;
-	/* Seqlock for all timekeeper values */
-	seqlock_t		lock;
+	/* Lock for all timekeeper values */
+	seqcount_t		seq;
+	raw_spinlock_t		lock;
 };
 
 static inline struct timespec tk_xtime(struct timekeeper *tk)
