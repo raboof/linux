@@ -367,6 +367,8 @@ asmlinkage void do_softirq(void)
 
 static inline void local_bh_disable_nort(void) { local_bh_disable(); }
 static inline void _local_bh_enable_nort(void) { _local_bh_enable(); }
+static inline void ksoftirqd_set_sched_params(void) { }
+static inline void ksoftirqd_clr_sched_params(void) { }
 
 #else /* !PREEMPT_RT_FULL */
 
@@ -520,6 +522,20 @@ static int ksoftirqd_do_softirq(int cpu)
 
 static inline void local_bh_disable_nort(void) { }
 static inline void _local_bh_enable_nort(void) { }
+
+static inline void ksoftirqd_set_sched_params(void)
+{
+	struct sched_param param = { .sched_priority = 1 };
+
+	sched_setscheduler(current, SCHED_FIFO, &param);
+}
+
+static inline void ksoftirqd_clr_sched_params(void)
+{
+	struct sched_param param = { .sched_priority = 0 };
+
+	sched_setscheduler(current, SCHED_NORMAL, &param);
+}
 
 #endif /* PREEMPT_RT_FULL */
 /*
@@ -977,6 +993,8 @@ static int ksoftirqd_should_run(unsigned int cpu)
 
 static void run_ksoftirqd(unsigned int cpu)
 {
+	ksoftirqd_set_sched_params();
+
 	local_irq_disable();
 	if (local_softirq_pending()) {
 		ksoftirqd_do_softirq(cpu);
@@ -986,6 +1004,8 @@ static void run_ksoftirqd(unsigned int cpu)
 		return;
 	}
 	local_irq_enable();
+
+	ksoftirqd_clr_sched_params();
 }
 
 #ifdef CONFIG_HOTPLUG_CPU
